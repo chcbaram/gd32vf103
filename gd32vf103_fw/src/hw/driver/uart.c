@@ -59,6 +59,7 @@ bool uartOpen(uint8_t ch, uint32_t baud)
 {
   bool ret = false;
   uint32_t usart_periph;
+  dma_parameter_struct dma_init_struct;
 
 
   switch(ch)
@@ -76,35 +77,57 @@ bool uartOpen(uint8_t ch, uint32_t baud)
       eclic_priority_group_set(ECLIC_PRIGROUP_LEVEL3_PRIO1);
       eclic_irq_enable(USART0_IRQn, 1, 0);
 
-      /* configure COM0 */
-      //gd_eval_com_init(EVAL_COM0);
 
-       rcu_periph_clock_enable(RCU_GPIOA);
-       rcu_periph_clock_enable(RCU_USART0);
+      rcu_periph_clock_enable(RCU_GPIOA);
+      rcu_periph_clock_enable(RCU_USART0);
 
-       // TXD
-       gpio_init(GPIOA, GPIO_MODE_AF_PP, GPIO_OSPEED_50MHZ, GPIO_PIN_9);
+      // TXD
+      gpio_init(GPIOA, GPIO_MODE_AF_PP, GPIO_OSPEED_50MHZ, GPIO_PIN_9);
 
-       // RXD
-       gpio_init(GPIOA, GPIO_MODE_IN_FLOATING, GPIO_OSPEED_50MHZ, GPIO_PIN_10);
+      // RXD
+      gpio_init(GPIOA, GPIO_MODE_IN_FLOATING, GPIO_OSPEED_50MHZ, GPIO_PIN_10);
 
 
-       usart_periph = uart_tbl[ch].h_uart;
+      usart_periph = uart_tbl[ch].h_uart;
 
-       usart_deinit(usart_periph);
-       usart_baudrate_set(usart_periph, baud);
-       usart_word_length_set(usart_periph, USART_WL_8BIT);
-       usart_stop_bit_set(usart_periph, USART_STB_1BIT);
-       usart_parity_config(usart_periph, USART_PM_NONE);
-       usart_hardware_flow_rts_config(usart_periph, USART_RTS_DISABLE);
-       usart_hardware_flow_cts_config(usart_periph, USART_CTS_DISABLE);
-       usart_receive_config(usart_periph, USART_RECEIVE_ENABLE);
-       usart_transmit_config(usart_periph, USART_TRANSMIT_ENABLE);
-       usart_enable(usart_periph);
+      usart_deinit(usart_periph);
+      usart_baudrate_set(usart_periph, baud);
+      usart_word_length_set(usart_periph, USART_WL_8BIT);
+      usart_stop_bit_set(usart_periph, USART_STB_1BIT);
+      usart_parity_config(usart_periph, USART_PM_NONE);
+      usart_hardware_flow_rts_config(usart_periph, USART_RTS_DISABLE);
+      usart_hardware_flow_cts_config(usart_periph, USART_CTS_DISABLE);
+      usart_receive_config(usart_periph, USART_RECEIVE_ENABLE);
+      usart_transmit_config(usart_periph, USART_TRANSMIT_ENABLE);
+      usart_enable(usart_periph);
 
 
-      usart_interrupt_enable(usart_periph, USART_INT_RBNE);
+      // Init DMA
+      //
+      rcu_periph_clock_enable(RCU_DMA0);
 
+
+      dma_deinit(DMA0, DMA_CH4);
+      dma_init_struct.direction = DMA_PERIPHERAL_TO_MEMORY;
+      dma_init_struct.memory_addr = (uint32_t)uart_tbl[ch].rx_buf;
+      dma_init_struct.memory_inc = DMA_MEMORY_INCREASE_ENABLE;
+      dma_init_struct.memory_width = DMA_MEMORY_WIDTH_8BIT;
+      dma_init_struct.number = UART_RX_BUF_LENGTH;
+      dma_init_struct.periph_addr = (uint32_t)&USART_DATA(USART0);
+      dma_init_struct.periph_inc = DMA_PERIPH_INCREASE_DISABLE;
+      dma_init_struct.periph_width = DMA_PERIPHERAL_WIDTH_8BIT;
+      dma_init_struct.priority = DMA_PRIORITY_ULTRA_HIGH;
+      dma_init(DMA0, DMA_CH4, &dma_init_struct);
+      /* configure DMA mode */
+      dma_circulation_enable(DMA0, DMA_CH4);
+      /* enable DMA channel4 */
+      dma_channel_enable(DMA0, DMA_CH4);
+
+      //usart_interrupt_enable(usart_periph, USART_INT_RBNE);
+      usart_dma_receive_config(USART0, USART_DENR_ENABLE);
+
+      uart_tbl[ch].qbuffer.in = uart_tbl[ch].qbuffer.len - DMA_CHCNT(DMA0, DMA_CH4);
+      uart_tbl[ch].qbuffer.out = uart_tbl[ch].qbuffer.in;
 
       uart_tbl[ch].is_open = true;
 
@@ -127,6 +150,7 @@ uint32_t uartAvailable(uint8_t ch)
   switch(ch)
   {
     case _DEF_UART1:
+      uart_tbl[ch].qbuffer.in = uart_tbl[ch].qbuffer.len - DMA_CHCNT(DMA0, DMA_CH4);
       ret = qbufferAvailable(&uart_tbl[ch].qbuffer);
       break;
   }
